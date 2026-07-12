@@ -1,0 +1,228 @@
+Ques:-
+
+The Nautilus DevOps team needs to set up three S3 buckets for different environments with backup and policy configurations. Follow the steps below:
+
+1. Create three S3 buckets using for_each for environments: Dev, Staging, and Prod.
+
+2. Name the buckets using the following naming convention:
+
+	-> devops-dev-bucket-12822
+	-> devops-staging-bucket-12822
+	-> devops-prod-bucket-12822
+
+3. Add the following tags to each bucket with the corresponding values:
+
+	a.) For devops-dev-bucket-12822:
+
+		-> Name = devops-dev-bucket-12822
+		-> Environment = Dev
+		-> Owner = Alice
+
+	b.) For devops-staging-bucket-12822:
+
+		-> Name = devops-staging-bucket-12822
+		-> Environment = Staging
+		-> Owner = Bob
+
+	c.) For devops-prod-bucket-12822:
+
+		-> Environment = Prod
+		-> Owner = Carol
+
+4. For the staging and prod buckets, set Backup = true and add a lifecycle rule with ID MoveToGlacier to transition objects to Glacier after 30 days.
+
+5. Use the lifecycle block with ignore_changes to protect the tags.
+
+6. Create a bucket policy that allows public read access to all objects in the bucket.
+
+7. Use depends_on to ensure the policy is only applied after the bucket has been created.
+
+8. Implement the entire configuration in a single main.tf file (do not create a separate .tf file) to provision multiple S3 buckets with the specified configurations.
+
+9. Use variables.tf with the following variable:
+
+	-> KKE_ENV_TAGS. KKE_ENV_TAGS is a map that holds environment-specific metadata such as bucket name, owner, and backup flag.
+	
+10. Use outputs.tf file to output the following:
+
+	-> kke_bucket_names: output the names of the bucket created.
+	
+	
+	
+
+Soln:-
+
+Step 1:- Navigate to your Terraform working directory
+
+cd /home/bob/terraform
+
+
+
+Step 2:- Verify the provider.tf file with the following content:
+
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+      version = "5.91.0"
+    }
+  }
+}
+
+provider "aws" {
+  region                      = "us-east-1"
+  skip_credentials_validation = true
+  skip_requesting_account_id  = true
+  s3_use_path_style = true
+
+endpoints {
+    ec2            = "http://aws:4566"
+    apigateway     = "http://aws:4566"
+    cloudformation = "http://aws:4566"
+    cloudwatch     = "http://aws:4566"
+    dynamodb       = "http://aws:4566"
+    es             = "http://aws:4566"
+    firehose       = "http://aws:4566"
+    iam            = "http://aws:4566"
+    kinesis        = "http://aws:4566"
+    lambda         = "http://aws:4566"
+    route53        = "http://aws:4566"
+    redshift       = "http://aws:4566"
+    s3             = "http://aws:4566"
+    secretsmanager = "http://aws:4566"
+    ses            = "http://aws:4566"
+    sns            = "http://aws:4566"
+    sqs            = "http://aws:4566"
+    ssm            = "http://aws:4566"
+    stepfunctions  = "http://aws:4566"
+    sts            = "http://aws:4566"
+    rds            = "http://aws:4566"
+  }
+}
+
+
+
+Step 3: Create the "main.tf" file
+
+# Create S3 buckets for Dev, Staging, and Prod using for_each
+resource "aws_s3_bucket" "env_buckets" {
+  for_each = var.KKE_ENV_TAGS
+
+  bucket = each.value["bucket_name"]
+
+  tags = {
+    Name        = each.value["bucket_name"]
+    Environment = each.key
+    Owner       = each.value["owner"]
+    Backup      = try(each.value["backup"], "false")
+  }
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
+# Lifecycle rules for staging and prod buckets
+resource "aws_s3_bucket_lifecycle_configuration" "env_buckets_lifecycle" {
+  for_each = {
+    for k, v in var.KKE_ENV_TAGS : k => v if try(v["backup"], "false") == "true"
+  }
+
+  bucket = aws_s3_bucket.env_buckets[each.key].id
+
+  rule {
+    id     = "MoveToGlacier"
+    status = "Enabled"
+
+    transition {
+      days          = 30
+      storage_class = "GLACIER"
+    }
+  }
+}
+
+# Public read bucket policy
+resource "aws_s3_bucket_policy" "env_buckets_policy" {
+  for_each = var.KKE_ENV_TAGS
+
+  bucket = aws_s3_bucket.env_buckets[each.key].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "PublicReadGetObject"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = ["s3:GetObject"]
+        Resource  = "${aws_s3_bucket.env_buckets[each.key].arn}/*"
+      }
+    ]
+  })
+
+  depends_on = [aws_s3_bucket.env_buckets]
+}
+
+
+
+Step 4: Create the "variables.tf" file
+
+variable "KKE_ENV_TAGS" {
+  description = "Map of environment-specific metadata for S3 buckets"
+  type        = map(map(string))
+}
+
+
+
+Step 5: Create the "terraform.tfvars" file
+
+KKE_ENV_TAGS = {
+  Dev = {
+    bucket_name = "devops-dev-bucket-12822"
+    owner       = "Alice"
+    backup      = "false"
+  }
+  Staging = {
+    bucket_name = "devops-staging-bucket-12822"
+    owner       = "Bob"
+    backup      = "true"
+  }
+  Prod = {
+    bucket_name = "devops-prod-bucket-12822"
+    owner       = "Carol"
+    backup      = "true"
+  }
+}
+
+
+
+Step 7: Create the "outputs.tf" file
+
+output "kke_bucket_names" {
+  description = "Names of the S3 buckets created"
+  value       = [for b in aws_s3_bucket.env_buckets : b.bucket]
+}
+
+
+
+Step 8: Initialize Terraform in the directory
+	
+terraform init
+
+
+
+Step 9: Check the Terraform Directory for the correct syntax
+
+terraform validate
+
+
+
+Step 10:- Plan the configuration in the directory
+
+terraform plan
+
+
+
+Step 11:- Apply the configuration to create the resources
+
+terraform apply --auto-approve
